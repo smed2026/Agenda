@@ -13,42 +13,54 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# CSS Customizado para Design Premium
+# CSS Customizado para Design Premium e Remoção de Elementos Nativos do Streamlit
 st.markdown("""
 <style>
-    .stApp {
-        background-color: #f8f9fa;
-    }
-    .main-header {
-        background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
-        padding: 24px;
-        border-radius: 12px;
-        color: white;
-        margin-bottom: 25px;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-    }
-    .main-header h1 {
-        color: white !important;
-        margin: 0;
-        font-weight: 700;
-    }
-    .main-header p {
-        color: #e0e0e0;
-        margin-top: 5px;
-        margin-bottom: 0;
-    }
-    .stButton > button {
-        border-radius: 8px;
-        font-weight: 600;
-    }
-    .event-card {
-        background-color: white;
-        border-left: 5px solid #2a5298;
-        padding: 15px;
-        border-radius: 8px;
-        margin-bottom: 10px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-    }
+/* Oculta o menu de opções (3 pontos), o botão de Deploy, cabeçalho e rodapé */
+#MainMenu {visibility: hidden;}
+header {visibility: hidden;}
+footer {visibility: hidden;}
+.stDeployButton {display:none !important;}
+[data-testid="stHeader"] {display: none !important;}
+[data-testid="stToolbar"] {display: none !important;}
+
+.stApp {
+    background-color: #f8f9fa;
+}
+
+/* Novo container branco para o cabeçalho com logo */
+.header-title-box {
+    background-color: #ffffff;
+    padding: 15px 20px;
+    border-radius: 10px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+    border-left: 5px solid #008751; /* Cor alinhada à identidade visual */
+}
+.header-title-box h1 {
+    color: #1e3c72 !important;
+    margin: 0;
+    font-weight: 700;
+    font-size: 1.6rem !important;
+}
+.header-title-box p {
+    color: #6c757d;
+    margin-top: 4px;
+    margin-bottom: 0;
+    font-size: 0.875rem;
+}
+
+.stButton > button {
+    border-radius: 8px;
+    font-weight: 600;
+}
+.event-card {
+    background-color: white;
+    border-left: 5px solid #2a5298;
+    padding: 15px;
+    border-radius: 8px;
+    margin-bottom: 10px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -92,12 +104,26 @@ with st.sidebar:
     st.markdown("---")
     st.caption("Desenvolvido com Streamlit & Supabase")
 
-st.markdown(f"""
-<div class="main-header">
-    <h1>{menu}</h1>
-    <p>Painel de controle corporativo e gestão institucional</p>
-</div>
-""", unsafe_allow_html=True)
+# -----------------------------------------------------------------------------
+# CABEÇALHO SUPERIOR (SUBSTITUIÇÃO DA FAIXA AZUL PELA LOGO + TÍTULO)
+# -----------------------------------------------------------------------------
+col_logo, col_titulo = st.columns([1.3, 3], gap="medium")
+
+with col_logo:
+    try:
+        st.image("logo_secretaria.png", width=320)
+    except Exception:
+        st.info("📌 *Salve a imagem como 'logo_secretaria.png' na pasta do código.*")
+
+with col_titulo:
+    st.markdown(f"""
+    <div class="header-title-box">
+        <h1>{menu}</h1>
+        <p>Governo de Jaguaquara — Secretaria de Educação | Gestão e Controle Institucional</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+st.markdown("---")
 
 # -----------------------------------------------------------------------------
 # 1. TELA: SECRETARIAS (CRUD)
@@ -137,7 +163,7 @@ if menu == "🏢 Secretarias":
                     st.warning("O nome da secretaria é obrigatório.")
 
         if codigo_edit:
-            if st.button("🗑️ Excluir Secretaria", type="primary"):
+            if st.button("🗑️️ Excluir Secretaria", type="primary"):
                 supabase.table("secretaria").delete().eq("codigo", codigo_edit).execute()
                 st.success("Registro excluído com sucesso!")
                 st.rerun()
@@ -313,7 +339,9 @@ elif menu == "📝 Gestão de Eventos":
             ev_status = "aberto"
             ev_responsabilidade = "Secretaria"
             ev_data = date.today()
-            ev_hora = time(9, 0)
+            ev_horaini = time(9, 0)
+            ev_horafim = time(10, 0)
+            ev_qtdpessoas = 0
             ev_escoladpto_val = ""
 
             if opcao_ev != "Novo Evento":
@@ -323,7 +351,18 @@ elif menu == "📝 Gestão de Eventos":
                 ev_status = reg["status"]
                 ev_responsabilidade = reg["responsabilidade"]
                 ev_data = datetime.strptime(str(reg["dataevento"]), "%Y-%m-%d").date()
-                ev_hora = datetime.strptime(str(reg["horaevento"]), "%H:%M:%S").time() if len(str(reg["horaevento"])) == 8 else time(9, 0)
+
+                # Leitura e tratamento do horário de início
+                if reg.get("horaeventoini") and len(str(reg["horaeventoini"])) >= 5:
+                    ev_horaini = datetime.strptime(str(reg["horaeventoini"])[:8], "%H:%M:%S").time() if len(
+                        str(reg["horaeventoini"])) == 8 else datetime.strptime(str(reg["horaeventoini"])[:5], "%H:%M").time()
+
+                # Leitura e tratamento do horário de fim
+                if reg.get("horaeventofim") and len(str(reg["horaeventofim"])) >= 5:
+                    ev_horafim = datetime.strptime(str(reg["horaeventofim"])[:8], "%H:%M:%S").time() if len(
+                        str(reg["horaeventofim"])) == 8 else datetime.strptime(str(reg["horaeventofim"])[:5], "%H:%M").time()
+
+                ev_qtdpessoas = int(reg.get("qtdpessoas", 0)) if pd.notnull(reg.get("qtdpessoas")) else 0
                 ev_local = reg["local"]
                 ev_escoladpto_val = reg["escoladpto"]
                 ev_resp = reg["responsavel"]
@@ -353,10 +392,14 @@ elif menu == "📝 Gestão de Eventos":
                                           index=idx_escoladpto if opcoes_escoladpto else 0) if opcoes_escoladpto else st.text_input(
                     "Local/Origem", value=ev_escoladpto_val)
 
-                c1, c2 = st.columns(2)
-                dataevento = c1.date_input("Data do Evento", value=ev_data)
-                horaevento = c2.time_input("Hora do Evento", value=ev_hora)
+                dataevento = st.date_input("Data do Evento", value=ev_data)
 
+                c1, c2 = st.columns(2)
+                horaeventoini = c1.time_input("Hora de Início", value=ev_horaini)
+                horaeventofim = c2.time_input("Hora de Término", value=ev_horafim)
+
+                # Campo qtdpessoas inserido antes do local
+                qtdpessoas = st.number_input("Qtd. de Pessoas", min_value=0, value=ev_qtdpessoas, step=1)
                 local = st.text_input("Local do Evento", value=ev_local)
                 responsavel = st.text_input("Responsável pelo Evento", value=ev_resp)
                 obs = st.text_area("Observações", value=ev_obs)
@@ -370,7 +413,9 @@ elif menu == "📝 Gestão de Eventos":
                             "status": status,
                             "responsabilidade": responsabilidade_sel,
                             "dataevento": str(dataevento),
-                            "horaevento": str(horaevento),
+                            "horaeventoini": str(horaeventoini),
+                            "horaeventofim": str(horaeventofim),
+                            "qtdpessoas": qtdpessoas,
                             "local": local,
                             "escoladpto": escoladpto,
                             "responsavel": responsavel,
@@ -387,7 +432,7 @@ elif menu == "📝 Gestão de Eventos":
                         st.warning("Preencha os campos obrigatórios (Evento, Local).")
 
             if codigo_edit:
-                if st.button("🗑️️ Excluir Evento", type="primary"):
+                if st.button("🗑 Excluir Evento", type="primary"):
                     supabase.table("eventos").delete().eq("codigo", codigo_edit).execute()
                     st.success("Evento removido!")
                     st.rerun()
@@ -445,7 +490,7 @@ elif menu == "📝 Gestão de Eventos":
                     st.info("Nenhum departamento vinculado a este evento.")
 
 # -----------------------------------------------------------------------------
-# 5. TELA: CALENDÁRIO VISUAL DOS EVENTOS (VISUALIZAÇÃO NATIVA MODERNA)
+# 5. TELA: CALENDÁRIO VISUAL DOS EVENTOS
 # -----------------------------------------------------------------------------
 elif menu == "📅 Calendário de Eventos":
     events_resp = supabase.table("eventos").select("*").execute()
@@ -473,7 +518,6 @@ elif menu == "📅 Calendário de Eventos":
     st.markdown(f"### Eventos de **{mes_sel} de {ano_sel}** ({len(eventos_filtrados)} evento(s))")
 
     if eventos_filtrados:
-        # Agrupar por data
         df_ev = pd.DataFrame(eventos_filtrados)
         df_ev = df_ev.sort_values(by="dataevento")
 
@@ -488,12 +532,17 @@ elif menu == "📅 Calendário de Eventos":
             st.markdown(f"#### 📅 {datetime.strptime(str(dt_group), '%Y-%m-%d').strftime('%d/%m/%Y')}")
             for _, ev in group.iterrows():
                 icone = status_colors.get(ev["status"], "🔵")
-                with st.expander(f"{icone} **{ev['horaevento']}** — {ev['evento']} ({ev['local']})"):
+                h_ini = ev.get('horaeventoini', '')
+                h_fim = ev.get('horaeventofim', '')
+                faixa_horario = f"{h_ini} às {h_fim}" if h_fim else f"{h_ini}"
+
+                with st.expander(f"{icone} **{faixa_horario}** — {ev['evento']} ({ev['local']})"):
                     c1, c2 = st.columns(2)
                     c1.write(f"**Status:** {ev['status'].capitalize()}")
                     c1.write(f"**Responsabilidade:** {ev['responsabilidade']}")
                     c1.write(f"**Origem/Dpto:** {ev['escoladpto']}")
                     c2.write(f"**Responsável:** {ev['responsavel']}")
+                    c2.write(f"**Qtd. Pessoas:** {ev.get('qtdpessoas', 0)}")
                     c2.write(f"**Local:** {ev['local']}")
                     if ev['obs']:
                         st.caption(f"**Observações:** {ev['obs']}")
@@ -512,7 +561,7 @@ elif menu == "📊 Relatórios":
 
     if st.button("🔎 Filtrar Relatório"):
         rel_resp = supabase.table("eventos") \
-            .select("evento, local, dataevento, horaevento, status, responsavel") \
+            .select("evento, local, dataevento, horaeventoini, horaeventofim, qtdpessoas, status, responsavel") \
             .gte("dataevento", str(dt_inicio)) \
             .lte("dataevento", str(dt_fim)) \
             .execute()
@@ -523,7 +572,9 @@ elif menu == "📊 Relatórios":
                 "evento": "Evento",
                 "local": "Local",
                 "dataevento": "Data",
-                "horaevento": "Hora",
+                "horaeventoini": "Hora Início",
+                "horaeventofim": "Hora Fim",
+                "qtdpessoas": "Qtd. Pessoas",
                 "status": "Status",
                 "responsavel": "Responsável"
             })
