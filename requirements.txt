@@ -1,0 +1,6 @@
+streamlit
+supabase
+pandas
+reportlab
+fpdf2
+streamlit-autorefresh
