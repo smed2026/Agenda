@@ -13,28 +13,45 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# CSS Customizado para Design Premium e Remoção de Elementos Nativos do Streamlit
+# CSS Customizado para Zerar Totalmente o Espaço do Topo
 st.markdown("""
 <style>
-/* Oculta o menu de opções (3 pontos), o botão de Deploy, cabeçalho e rodapé */
+/* Oculta o menu nativo, barra superior, rodapé e o header fixo do Streamlit */
 #MainMenu {visibility: hidden;}
-header {visibility: hidden;}
+header {visibility: hidden !important; height: 0px !important;}
 footer {visibility: hidden;}
 .stDeployButton {display:none !important;}
-[data-testid="stHeader"] {display: none !important;}
+[data-testid="stHeader"] {display: none !important; height: 0px !important;}
 [data-testid="stToolbar"] {display: none !important;}
+
+/* Força zerar todos os espaçamentos superiores das estruturas de contêineres */
+html, body, [data-testid="stAppViewContainer"], .main, .block-container {
+    padding-top: 0rem !important;
+    margin-top: 0rem !important;
+}
+
+div[data-testid="stMainBlockContainer"] {
+    padding-top: 0rem !important;
+    padding-bottom: 2rem !important;
+    margin-top: 0rem !important;
+}
+
+[data-testid="stAppViewContainer"] > section:nth-child(2) {
+    padding-top: 0rem !important;
+}
 
 .stApp {
     background-color: #f8f9fa;
 }
 
-/* Novo container branco para o cabeçalho com logo */
+/* Container do cabeçalho customizado */
 .header-title-box {
     background-color: #ffffff;
     padding: 15px 20px;
     border-radius: 10px;
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
-    border-left: 5px solid #008751; /* Cor alinhada à identidade visual */
+    border-left: 5px solid #008751;
+    margin-top: 0px !important;
 }
 .header-title-box h1 {
     color: #1e3c72 !important;
@@ -96,6 +113,7 @@ with st.sidebar:
             "📅 Calendário de Eventos",
             "🏢 Secretarias",
             "🏛️ Departamentos",
+            "📂 Setores",
             "🏫 Escolas",
             "📝 Gestão de Eventos",
             "📊 Relatórios"
@@ -105,9 +123,9 @@ with st.sidebar:
     st.caption("Desenvolvido com Streamlit & Supabase")
 
 # -----------------------------------------------------------------------------
-# CABEÇALHO SUPERIOR (SUBSTITUIÇÃO DA FAIXA AZUL PELA LOGO + TÍTULO)
+# CABEÇALHO SUPERIOR (LOGOTIPO + TÍTULO DA PÁGINA)
 # -----------------------------------------------------------------------------
-col_logo, col_titulo = st.columns([1.3, 3], gap="medium")
+col_logo, col_titulo = st.columns([1.3, 3], gap="medium", vertical_alignment="center")
 
 with col_logo:
     try:
@@ -136,7 +154,12 @@ if menu == "🏢 Secretarias":
         sec_resp = supabase.table("secretaria").select("*").execute()
         sec_df = pd.DataFrame(sec_resp.data) if sec_resp.data else pd.DataFrame(columns=["codigo", "nome"])
 
-        opcao_sec = st.selectbox("Ação", ["Nova Secretaria"] + [f"{row['codigo']} - {row['nome']}" for _, row in sec_df.iterrows()])
+        options_sec = ["Nova Secretaria"] + [f"{row['codigo']} - {row['nome']}" for _, row in sec_df.iterrows()]
+
+        if "sel_sec_action" not in st.session_state or st.session_state["sel_sec_action"] not in options_sec:
+            st.session_state["sel_sec_action"] = "Nova Secretaria"
+
+        opcao_sec = st.selectbox("Ação", options_sec, key="sel_sec_action")
 
         codigo_edit = None
         nome_default = ""
@@ -147,7 +170,7 @@ if menu == "🏢 Secretarias":
             nome_default = registro["nome"]
 
         with st.form("form_secretaria", clear_on_submit=True):
-            nome = st.text_input("Nome da Secretaria", value=nome_default)
+            nome = st.text_input("Nome da Secretaria", value=nome_default if codigo_edit else "")
             btn_salvar = st.form_submit_button("💾 Salvar Registro")
 
             if btn_salvar:
@@ -158,14 +181,17 @@ if menu == "🏢 Secretarias":
                     else:
                         supabase.table("secretaria").insert({"nome": nome}).execute()
                         st.success("Secretaria cadastrada com sucesso!")
+
+                    st.session_state["sel_sec_action"] = "Nova Secretaria"
                     st.rerun()
                 else:
                     st.warning("O nome da secretaria é obrigatório.")
 
         if codigo_edit:
-            if st.button("🗑️️ Excluir Secretaria", type="primary"):
+            if st.button("🗑 Excluir Secretaria", type="primary"):
                 supabase.table("secretaria").delete().eq("codigo", codigo_edit).execute()
                 st.success("Registro excluído com sucesso!")
+                st.session_state["sel_sec_action"] = "Nova Secretaria"
                 st.rerun()
 
     with col2:
@@ -193,8 +219,12 @@ elif menu == "🏛️ Departamentos":
 
         with col1:
             st.subheader("Cadastrar / Editar Departamento")
-            opcao_dep = st.selectbox("Ação",
-                                     ["Novo Departamento"] + [f"{row['codigo']} - {row['departamento']}" for _, row in dep_df.iterrows()])
+            options_dep = ["Novo Departamento"] + [f"{row['codigo']} - {row['departamento']}" for _, row in dep_df.iterrows()]
+
+            if "sel_dep_action" not in st.session_state or st.session_state["sel_dep_action"] not in options_dep:
+                st.session_state["sel_dep_action"] = "Novo Departamento"
+
+            opcao_dep = st.selectbox("Ação", options_dep, key="sel_dep_action")
 
             codigo_edit = None
             dep_default = ""
@@ -213,10 +243,10 @@ elif menu == "🏛️ Departamentos":
                     if v == registro["codsecretaria"]:
                         sec_idx = idx
 
-            with st.form("form_departamento"):
-                sec_selecionada = st.selectbox("Secretaria Vinculada", sec_options, index=sec_idx)
-                departamento = st.text_input("Nome do Departamento", value=dep_default)
-                responsavel = st.text_input("Responsável", value=resp_default)
+            with st.form("form_departamento", clear_on_submit=True):
+                sec_selecionada = st.selectbox("Secretaria Vinculada", sec_options, index=sec_idx if codigo_edit else 0)
+                departamento = st.text_input("Nome do Departamento", value=dep_default if codigo_edit else "")
+                responsavel = st.text_input("Responsável", value=resp_default if codigo_edit else "")
 
                 btn_salvar = st.form_submit_button("💾 Salvar Registro")
 
@@ -233,14 +263,17 @@ elif menu == "🏛️ Departamentos":
                         else:
                             supabase.table("departamentos").insert(payload).execute()
                             st.success("Departamento cadastrado!")
+
+                        st.session_state["sel_dep_action"] = "Novo Departamento"
                         st.rerun()
                     else:
                         st.warning("Preencha todos os campos obrigatórios.")
 
             if codigo_edit:
-                if st.button("🗑️ Excluir Departamento", type="primary"):
+                if st.button("🗑 Excluir Departamento", type="primary"):
                     supabase.table("departamentos").delete().eq("codigo", codigo_edit).execute()
                     st.success("Departamento excluído!")
+                    st.session_state["sel_dep_action"] = "Novo Departamento"
                     st.rerun()
 
         with col2:
@@ -259,7 +292,97 @@ elif menu == "🏛️ Departamentos":
                 st.info("Nenhum departamento cadastrado.")
 
 # -----------------------------------------------------------------------------
-# 3. TELA: ESCOLAS (CRUD)
+# 3. TELA: SETORES (CRUD)
+# -----------------------------------------------------------------------------
+elif menu == "📂 Setores":
+    dep_resp = supabase.table("departamentos").select("*").execute()
+    dep_list = dep_resp.data if dep_resp.data else []
+
+    if not dep_list:
+        st.warning("Cadastre ao menos um Departamento antes de adicionar Setores.")
+    else:
+        col1, col2 = st.columns([1, 1.5], gap="large")
+
+        setor_resp = supabase.table("setor").select("*").execute()
+        setor_df = pd.DataFrame(setor_resp.data) if setor_resp.data else pd.DataFrame(
+            columns=["codigo", "deptocodigo", "setor", "responsavel"])
+
+        with col1:
+            st.subheader("Cadastrar / Editar Setor")
+            options_setor = ["Novo Setor"] + [f"{row['codigo']} - {row['setor']}" for _, row in setor_df.iterrows()]
+
+            if "sel_setor_action" not in st.session_state or st.session_state["sel_setor_action"] not in options_setor:
+                st.session_state["sel_setor_action"] = "Novo Setor"
+
+            opcao_setor = st.selectbox("Ação", options_setor, key="sel_setor_action")
+
+            codigo_edit = None
+            setor_default = ""
+            resp_default = ""
+            dep_idx = 0
+
+            dep_dict = {f"{d['codigo']} - {d['departamento']}": d['codigo'] for d in dep_list}
+            dep_options = list(dep_dict.keys())
+
+            if opcao_setor != "Novo Setor":
+                codigo_edit = int(opcao_setor.split(" - ")[0])
+                registro = setor_df[setor_df["codigo"] == codigo_edit].iloc[0]
+                setor_default = registro["setor"]
+                resp_default = registro["responsavel"]
+                for idx, (k, v) in enumerate(dep_dict.items()):
+                    if v == registro["deptocodigo"]:
+                        dep_idx = idx
+
+            with st.form("form_setor", clear_on_submit=True):
+                dep_selecionado = st.selectbox("Departamento Vinculado", dep_options, index=dep_idx if codigo_edit else 0)
+                setor_nome = st.text_input("Nome do Setor", value=setor_default if codigo_edit else "")
+                responsavel = st.text_input("Responsável", value=resp_default if codigo_edit else "")
+
+                btn_salvar = st.form_submit_button("💾 Salvar Registro")
+
+                if btn_salvar:
+                    if setor_nome.strip() and responsavel.strip():
+                        payload = {
+                            "deptocodigo": dep_dict[dep_selecionado],
+                            "setor": setor_nome,
+                            "responsavel": responsavel
+                        }
+                        if codigo_edit:
+                            supabase.table("setor").update(payload).eq("codigo", codigo_edit).execute()
+                            st.success("Setor atualizado com sucesso!")
+                        else:
+                            supabase.table("setor").insert(payload).execute()
+                            st.success("Setor cadastrado com sucesso!")
+
+                        st.session_state["sel_setor_action"] = "Novo Setor"
+                        st.rerun()
+                    else:
+                        st.warning("Preencha todos os campos obrigatórios.")
+
+            if codigo_edit:
+                if st.button("🗑 Excluir Setor", type="primary"):
+                    supabase.table("setor").delete().eq("codigo", codigo_edit).execute()
+                    st.success("Setor excluído com sucesso!")
+                    st.session_state["sel_setor_action"] = "Novo Setor"
+                    st.rerun()
+
+        with col2:
+            st.subheader("Setores Cadastrados")
+            if not setor_df.empty:
+                st.dataframe(
+                    setor_df.rename(columns={
+                        "codigo": "Código",
+                        "deptocodigo": "Cód. Departamento",
+                        "setor": "Setor",
+                        "responsavel": "Responsável"
+                    }),
+                    use_container_width=True
+                )
+            else:
+                st.info("Nenhum setor cadastrado.")
+
+# -----------------------------------------------------------------------------
+# 4. TELA: ESCOLAS (CRUD)
 # -----------------------------------------------------------------------------
 elif menu == "🏫 Escolas":
     col1, col2 = st.columns([1, 1.5], gap="large")
@@ -269,7 +392,12 @@ elif menu == "🏫 Escolas":
 
     with col1:
         st.subheader("Cadastrar / Editar Escola")
-        opcao_esc = st.selectbox("Ação", ["Nova Escola"] + [f"{row['codigo']} - {row['escola']}" for _, row in esc_df.iterrows()])
+        options_esc = ["Nova Escola"] + [f"{row['codigo']} - {row['escola']}" for _, row in esc_df.iterrows()]
+
+        if "sel_esc_action" not in st.session_state or st.session_state["sel_esc_action"] not in options_esc:
+            st.session_state["sel_esc_action"] = "Nova Escola"
+
+        opcao_esc = st.selectbox("Ação", options_esc, key="sel_esc_action")
 
         codigo_edit = None
         escola_default = ""
@@ -281,9 +409,9 @@ elif menu == "🏫 Escolas":
             escola_default = registro["escola"]
             diretora_default = registro["diretora"]
 
-        with st.form("form_escola"):
-            escola = st.text_input("Nome da Escola", value=escola_default)
-            diretora = st.text_input("Diretora / Responsável", value=diretora_default)
+        with st.form("form_escola", clear_on_submit=True):
+            escola = st.text_input("Nome da Escola", value=escola_default if codigo_edit else "")
+            diretora = st.text_input("Diretora / Responsável", value=diretora_default if codigo_edit else "")
 
             btn_salvar = st.form_submit_button("💾 Salvar Registro")
 
@@ -296,14 +424,17 @@ elif menu == "🏫 Escolas":
                     else:
                         supabase.table("escolas").insert(payload).execute()
                         st.success("Escola cadastrada!")
+
+                    st.session_state["sel_esc_action"] = "Nova Escola"
                     st.rerun()
                 else:
                     st.warning("Preencha todos os campos.")
 
         if codigo_edit:
-            if st.button("🗑️ Excluir Escola", type="primary"):
+            if st.button("🗑 Excluir Escola", type="primary"):
                 supabase.table("escolas").delete().eq("codigo", codigo_edit).execute()
                 st.success("Escola excluída!")
+                st.session_state["sel_esc_action"] = "Nova Escola"
                 st.rerun()
 
     with col2:
@@ -317,7 +448,7 @@ elif menu == "🏫 Escolas":
             st.info("Nenhuma escola cadastrada.")
 
 # -----------------------------------------------------------------------------
-# 4. TELA: GESTÃO DE EVENTOS
+# 5. TELA: GESTÃO DE EVENTOS
 # -----------------------------------------------------------------------------
 elif menu == "📝 Gestão de Eventos":
     tab1, tab2 = st.tabs(["📌 Cadastro e Edição", "🔗 Departamentos Envolvidos"])
@@ -331,8 +462,13 @@ elif menu == "📝 Gestão de Eventos":
         with col1:
             st.subheader("Dados do Evento")
 
-            opcao_ev = st.selectbox("Ação", ["Novo Evento"] + (
-                [f"{row['codigo']} - {row['evento']}" for _, row in events_df.iterrows()] if not events_df.empty else []))
+            options_ev = ["Novo Evento"] + (
+                [f"{row['codigo']} - {row['evento']}" for _, row in events_df.iterrows()] if not events_df.empty else [])
+
+            if "sel_ev_action" not in st.session_state or st.session_state["sel_ev_action"] not in options_ev:
+                st.session_state["sel_ev_action"] = "Novo Evento"
+
+            opcao_ev = st.selectbox("Ação", options_ev, key="sel_ev_action")
 
             codigo_edit = None
             ev_nome, ev_local, ev_resp, ev_obs = "", "", "", ""
@@ -352,12 +488,10 @@ elif menu == "📝 Gestão de Eventos":
                 ev_responsabilidade = reg["responsabilidade"]
                 ev_data = datetime.strptime(str(reg["dataevento"]), "%Y-%m-%d").date()
 
-                # Leitura e tratamento do horário de início
                 if reg.get("horaeventoini") and len(str(reg["horaeventoini"])) >= 5:
                     ev_horaini = datetime.strptime(str(reg["horaeventoini"])[:8], "%H:%M:%S").time() if len(
                         str(reg["horaeventoini"])) == 8 else datetime.strptime(str(reg["horaeventoini"])[:5], "%H:%M").time()
 
-                # Leitura e tratamento do horário de fim
                 if reg.get("horaeventofim") and len(str(reg["horaeventofim"])) >= 5:
                     ev_horafim = datetime.strptime(str(reg["horaeventofim"])[:8], "%H:%M:%S").time() if len(
                         str(reg["horaeventofim"])) == 8 else datetime.strptime(str(reg["horaeventofim"])[:5], "%H:%M").time()
@@ -380,29 +514,30 @@ elif menu == "📝 Gestão de Eventos":
                 opcoes_escoladpto = [e["escola"] for e in esc_data] if esc_data else []
 
             idx_escoladpto = 0
-            if ev_escoladpto_val in opcoes_escoladpto:
+            if codigo_edit and ev_escoladpto_val in opcoes_escoladpto:
                 idx_escoladpto = opcoes_escoladpto.index(ev_escoladpto_val)
 
-            with st.form("form_evento"):
-                evento = st.text_input("Nome do Evento", value=ev_nome)
+            with st.form("form_evento", clear_on_submit=True):
+                evento = st.text_input("Nome do Evento", value=ev_nome if codigo_edit else "")
                 status = st.selectbox("Status", ["aberto", "confirmado", "cancelado", "finalizado"],
-                                      index=["aberto", "confirmado", "cancelado", "finalizado"].index(ev_status))
+                                      index=["aberto", "confirmado", "cancelado", "finalizado"].index(ev_status) if codigo_edit else 0)
 
                 escoladpto = st.selectbox(f"Origem / Seleção ({responsabilidade_sel})", opcoes_escoladpto,
-                                          index=idx_escoladpto if opcoes_escoladpto else 0) if opcoes_escoladpto else st.text_input(
-                    "Local/Origem", value=ev_escoladpto_val)
+                                          index=idx_escoladpto if (
+                                                  codigo_edit and opcoes_escoladpto) else 0) if opcoes_escoladpto else st.text_input(
+                    "Local/Origem", value=ev_escoladpto_val if codigo_edit else "")
 
-                dataevento = st.date_input("Data do Evento", value=ev_data)
+                # Ajustado com formato="DD/MM/YYYY" para exibição no padrão brasileiro
+                dataevento = st.date_input("Data do Evento", value=ev_data if codigo_edit else date.today(), format="DD/MM/YYYY")
 
                 c1, c2 = st.columns(2)
-                horaeventoini = c1.time_input("Hora de Início", value=ev_horaini)
-                horaeventofim = c2.time_input("Hora de Término", value=ev_horafim)
+                horaeventoini = c1.time_input("Hora de Início", value=ev_horaini if codigo_edit else time(9, 0))
+                horaeventofim = c2.time_input("Hora de Término", value=ev_horafim if codigo_edit else time(10, 0))
 
-                # Campo qtdpessoas inserido antes do local
-                qtdpessoas = st.number_input("Qtd. de Pessoas", min_value=0, value=ev_qtdpessoas, step=1)
-                local = st.text_input("Local do Evento", value=ev_local)
-                responsavel = st.text_input("Responsável pelo Evento", value=ev_resp)
-                obs = st.text_area("Observações", value=ev_obs)
+                qtdpessoas = st.number_input("Qtd. de Pessoas", min_value=0, value=ev_qtdpessoas if codigo_edit else 0, step=1)
+                local = st.text_input("Local do Evento", value=ev_local if codigo_edit else "")
+                responsavel = st.text_input("Responsável pelo Evento", value=ev_resp if codigo_edit else "")
+                obs = st.text_area("Observações", value=ev_obs if codigo_edit else "")
 
                 btn_salvar_ev = st.form_submit_button("💾 Salvar Evento")
 
@@ -427,6 +562,8 @@ elif menu == "📝 Gestão de Eventos":
                         else:
                             supabase.table("eventos").insert(payload).execute()
                             st.success("Evento criado com sucesso!")
+
+                        st.session_state["sel_ev_action"] = "Novo Evento"
                         st.rerun()
                     else:
                         st.warning("Preencha os campos obrigatórios (Evento, Local).")
@@ -435,12 +572,16 @@ elif menu == "📝 Gestão de Eventos":
                 if st.button("🗑 Excluir Evento", type="primary"):
                     supabase.table("eventos").delete().eq("codigo", codigo_edit).execute()
                     st.success("Evento removido!")
+                    st.session_state["sel_ev_action"] = "Novo Evento"
                     st.rerun()
 
         with col2:
             st.subheader("Eventos Cadastrados")
             if not events_df.empty:
-                st.dataframe(events_df, use_container_width=True)
+                display_df = events_df.copy()
+                if "dataevento" in display_df.columns:
+                    display_df["dataevento"] = pd.to_datetime(display_df["dataevento"]).dt.strftime("%d/%m/%Y")
+                st.dataframe(display_df, use_container_width=True)
             else:
                 st.info("Nenhum evento registrado no sistema.")
 
@@ -459,7 +600,7 @@ elif menu == "📝 Gestão de Eventos":
             col_d1, col_d2 = st.columns([1, 1.5])
 
             with col_d1:
-                with st.form("form_dpto_envolvido"):
+                with st.form("form_dpto_envolvido", clear_on_submit=True):
                     dpto_env = st.selectbox("Departamento Envolvido", dptos_lista) if dptos_lista else st.text_input(
                         "Departamento Envolvido")
                     necessidade = st.text_area("Necessidade / Recursos Solicitados")
@@ -490,7 +631,7 @@ elif menu == "📝 Gestão de Eventos":
                     st.info("Nenhum departamento vinculado a este evento.")
 
 # -----------------------------------------------------------------------------
-# 5. TELA: CALENDÁRIO VISUAL DOS EVENTOS
+# 6. TELA: CALENDÁRIO VISUAL DOS EVENTOS
 # -----------------------------------------------------------------------------
 elif menu == "📅 Calendário de Eventos":
     events_resp = supabase.table("eventos").select("*").execute()
@@ -505,7 +646,6 @@ elif menu == "📅 Calendário de Eventos":
 
     num_mes = meses_pt.index(mes_sel) + 1
 
-    # Filtrar eventos do Mês/Ano selecionados
     eventos_filtrados = []
     for ev in events:
         try:
@@ -550,14 +690,14 @@ elif menu == "📅 Calendário de Eventos":
         st.info("Nenhum evento agendado para o mês selecionado.")
 
 # -----------------------------------------------------------------------------
-# 6. TELA: RELATÓRIO DE EVENTOS POR PERÍODO
+# 7. TELA: RELATÓRIO DE EVENTOS POR PERÍODO
 # -----------------------------------------------------------------------------
 elif menu == "📊 Relatórios":
     st.subheader("Gerar Relatório de Eventos por Período")
 
     col_r1, col_r2 = st.columns(2)
-    dt_inicio = col_r1.date_input("Data Inicial", value=date.today().replace(day=1))
-    dt_fim = col_r2.date_input("Data Final", value=date.today())
+    dt_inicio = col_r1.date_input("Data Inicial", value=date.today().replace(day=1), format="DD/MM/YYYY")
+    dt_fim = col_r2.date_input("Data Final", value=date.today(), format="DD/MM/YYYY")
 
     if st.button("🔎 Filtrar Relatório"):
         rel_resp = supabase.table("eventos") \
@@ -568,6 +708,11 @@ elif menu == "📊 Relatórios":
 
         if rel_resp.data:
             df_rel = pd.DataFrame(rel_resp.data)
+
+            # Formatação de exibição da coluna de data no relatório
+            if "dataevento" in df_rel.columns:
+                df_rel["dataevento"] = pd.to_datetime(df_rel["dataevento"]).dt.strftime("%d/%m/%Y")
+
             df_rel = df_rel.rename(columns={
                 "evento": "Evento",
                 "local": "Local",
@@ -586,7 +731,7 @@ elif menu == "📊 Relatórios":
             st.download_button(
                 label="📥 Baixar Relatório em CSV",
                 data=csv,
-                file_name=f"relatorio_eventos_{dt_inicio}_a_{dt_fim}.csv",
+                file_name=f"relatorio_eventos_{dt_inicio.strftime('%d_%m_%Y')}_a_{dt_fim.strftime('%d_%m_%Y')}.csv",
                 mime="text/csv",
             )
         else:
