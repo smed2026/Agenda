@@ -4,3 +4,5 @@ pandas
 reportlab
 fpdf2
 streamlit-autorefresh
+plotly
+psycopg2-binary
