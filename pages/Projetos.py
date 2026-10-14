@@ -2,19 +2,18 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from supabase import create_client, Client
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 
 # -----------------------------------------------------------------------------
 # CONFIGURAÇÃO DA PÁGINA & ESTILIZAÇÃO CSS
 # -----------------------------------------------------------------------------
 st.set_page_config(
-    page_title="Sistema de Gestão de Projetos e Processos",
+    page_title="Gestão de Projetos, Processos e Metas",
     layout="wide",
     page_icon="📊",
     initial_sidebar_state="expanded"
 )
 
-# Estilização CSS Personalizada
 st.markdown("""
     <style>
         .stApp {
@@ -25,7 +24,7 @@ st.markdown("""
             border-left: 5px solid #2563eb;
             padding: 16px;
             border-radius: 8px;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
         }
         section[data-testid="stSidebar"] {
             background-color: #0f172a;
@@ -49,26 +48,27 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# -----------------------------------------------------------------------------
-# CONEXÃO COM O SUPABASE
-# -----------------------------------------------------------------------------
-SUPABASE_URL = "https://sldhiftwxqynjcnpaysl.supabase.co"
-SUPABASE_KEY = "sb_publishable_m9NM4QJ433cSXQLvM-4PRw_NMEKEorT"
 
-
+# -----------------------------------------------------------------------------
+# CONEXÃO COM O SUPABASE (Via Secrets)
+# -----------------------------------------------------------------------------
 @st.cache_resource
 def init_supabase() -> Client:
+    SUPABASE_URL = "https://sldhiftwxqynjcnpaysl.supabase.co"
+    SUPABASE_KEY = "sb_publishable_m9NM4QJ433cSXQLvM-4PRw_NMEKEorT"
     return create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
 try:
     supabase = init_supabase()
 except Exception as e:
-    st.error("❌ Erro ao conectar ao Supabase. Verifique suas credenciais em .streamlit/secrets.toml")
+    st.error("❌ Erro ao conectar ao Supabase. Verifique suas credenciais.")
     st.stop()
 
 
-# Funções auxiliares com busca segura
+# -----------------------------------------------------------------------------
+# FUNÇÕES DE BUSCA E GERAÇÃO DE CÓDIGOS
+# -----------------------------------------------------------------------------
 def get_projetos() -> pd.DataFrame:
     try:
         res = supabase.table("projetos").select("*").execute()
@@ -86,10 +86,40 @@ def get_processos(codigo_projeto=None) -> pd.DataFrame:
             query = query.eq("codigo_projeto", codigo_projeto)
         res = query.order("ordem").execute()
         if res.data:
-            return pd.DataFrame(res.data)
+            df = pd.DataFrame(res.data)
+            hoje = date.today()
+            if 'data_final' in df.columns and 'status' in df.columns:
+                for idx, row in df.iterrows():
+                    if row['status'] == 'Pendente' and pd.notnull(row['data_final']):
+                        dt_fim = pd.to_datetime(row['data_final']).date()
+                        if dt_fim < hoje:
+                            df.at[idx, 'status'] = 'Atrasado'
+            return df
         return pd.DataFrame()
     except Exception:
         return pd.DataFrame()
+
+
+def gerar_codigo_projeto() -> str:
+    """Gera um código de projeto automático."""
+    try:
+        df = get_projetos()
+        count = len(df) + 1
+        ano_atual = datetime.now().strftime("%Y")
+        return f"PRJ-{ano_atual}-{count:03d}"
+    except Exception:
+        return f"PRJ-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+
+
+def gerar_codigo_processo() -> str:
+    """Gera um código de processo/meta automático."""
+    try:
+        df = get_processos()
+        count = len(df) + 1 if not df.empty else 1
+        ano_atual = datetime.now().strftime("%Y")
+        return f"PRC-{ano_atual}-{count:03d}"
+    except Exception:
+        return f"PRC-{datetime.now().strftime('%Y%m%d%H%M%S')}"
 
 
 # -----------------------------------------------------------------------------
@@ -102,8 +132,9 @@ menu = st.sidebar.radio(
     [
         "Dashboard Principal",
         "Cadastro de Projetos",
-        "Cadastro de Processos",
+        "Cadastro de Processos / Metas",
         "Gantt & Reagendamento Cascata",
+        "Gestão e Atualização de Metas",
         "Relatório por Departamento"
     ]
 )
@@ -119,10 +150,8 @@ if menu == "Dashboard Principal":
     df_proc = get_processos()
 
     if df_proj.empty:
-        st.warning(
-            "⚠️️ Nenhuma informação encontrada. Se você ainda não criou as tabelas no Supabase, execute o código SQL disponibilizado.")
+        st.warning("⚠️ Nenhum projeto encontrado no banco de dados.")
     else:
-        # Métricas defensivas no topo
         m1, m2, m3, m4, m5 = st.columns(5)
 
         total_proj = df_proj.shape[0]
@@ -133,13 +162,13 @@ if menu == "Dashboard Principal":
 
         if not df_proc.empty and 'status' in df_proc.columns:
             m_cumprida = df_proc[df_proc['status'] == 'Cumprida'].shape[0]
-            m_atraso = df_proc[df_proc['status'] == 'Cumprida em Atraso'].shape[0]
+            m_atraso_cumprida = df_proc[df_proc['status'] == 'Cumprida em Atraso'].shape[0]
             m_pendente = df_proc[df_proc['status'] == 'Pendente'].shape[0]
-            m_nao_cumprida = df_proc[df_proc['status'] == 'Não Cumprida'].shape[0]
+            m_atrasadas = df_proc[df_proc['status'] == 'Atrasado'].shape[0] + df_proc[df_proc['status'] == 'Não Cumprida'].shape[0]
 
             m3.metric("Metas Cumpridas", m_cumprida)
-            m4.metric("Cumpridas em Atraso", m_atraso)
-            m5.metric("Pendentes / Atrasadas", f"{m_pendente} / {m_nao_cumprida}")
+            m4.metric("Cumpridas em Atraso", m_atraso_cumprida)
+            m5.metric("Pendentes / Atrasadas", f"{m_pendente} / {m_atrasadas}")
         else:
             m3.metric("Metas Cumpridas", 0)
             m4.metric("Cumpridas em Atraso", 0)
@@ -147,7 +176,6 @@ if menu == "Dashboard Principal":
 
         st.markdown("---")
 
-        # Gráficos em Dashboard
         col_g1, col_g2 = st.columns(2)
 
         with col_g1:
@@ -175,50 +203,104 @@ if menu == "Dashboard Principal":
                         'Cumprida': '#22c55e',
                         'Cumprida em Atraso': '#eab308',
                         'Pendente': '#3b82f6',
-                        'Não Cumprida': '#ef4444'
+                        'Atrasado': '#ef4444',
+                        'Não Cumprida': '#991b1b'
                     }
                 )
                 fig_status.update_layout(template="plotly_white", margin=dict(l=20, r=20, t=30, b=20))
                 st.plotly_chart(fig_status, use_container_width=True)
-            else:
-                st.info("Nenhum processo/meta cadastrado.")
 
 # -----------------------------------------------------------------------------
 # 2. CADASTRO DE PROJETOS
 # -----------------------------------------------------------------------------
 elif menu == "Cadastro de Projetos":
     st.title("📁 Cadastro de Projetos")
-    st.markdown("Preencha as informações para registrar um novo projeto no sistema.")
 
-    with st.form("form_projeto", clear_on_submit=True):
+    df_p = get_projetos()
+    modo_edicao = False
+    projeto_selecionado = None
+
+    if not df_p.empty:
+        st.markdown("💡 *Selecione um projeto abaixo caso queira carregar os dados para edição ou cadastre um novo.*")
+        lista_opcoes = ["-- Cadastrar Novo Projeto --"] + [f"{row['codigo']} - {row['nome']}" for _, row in df_p.iterrows()]
+        escolha = st.selectbox("Ação / Selecionar Projeto", lista_opcoes)
+
+        if escolha != "-- Cadastrar Novo Projeto --":
+            codigo_escolhido = escolha.split(" - ")[0]
+            projeto_selecionado = df_p[df_p['codigo'] == codigo_escolhido].iloc[0]
+            modo_edicao = True
+
+    if modo_edicao and projeto_selecionado is not None:
+        st.info(f"✏️ Editando o projeto: **{projeto_selecionado['codigo']}**")
+        def_codigo = projeto_selecionado['codigo']
+        def_nome = projeto_selecionado.get('nome', '')
+        def_departamento = projeto_selecionado.get('departamento', '')
+        def_setor = projeto_selecionado.get('setor', '')
+        def_responsavel = projeto_selecionado.get('responsavel', '')
+        def_doc = projeto_selecionado.get('doc_demanda', '')
+
+        try:
+            def_dt_rec = pd.to_datetime(projeto_selecionado.get('data_receb_demanda', date.today())).date()
+        except:
+            def_dt_rec = date.today()
+        try:
+            def_dt_ini = pd.to_datetime(projeto_selecionado.get('data_inicio', date.today())).date()
+        except:
+            def_dt_ini = date.today()
+        try:
+            def_dt_fim = pd.to_datetime(projeto_selecionado.get('data_fim_prevista', date.today())).date()
+        except:
+            def_dt_fim = date.today()
+
+        status_list = ["Em Andamento", "Pendente", "Concluído", "Cancelado"]
+        current_status = projeto_selecionado.get('status_projeto', 'Em Andamento')
+        def_status_idx = status_list.index(current_status) if current_status in status_list else 0
+        def_justificativa = projeto_selecionado.get('justificativa', '')
+        def_obs = projeto_selecionado.get('obs', '')
+    else:
+        def_codigo = gerar_codigo_projeto()
+        def_nome = ""
+        def_departamento = ""
+        def_setor = ""
+        def_responsavel = ""
+        def_doc = ""
+        def_dt_rec = date.today()
+        def_dt_ini = date.today()
+        def_dt_fim = date.today()
+        def_status_idx = 0
+        def_justificativa = ""
+        def_obs = ""
+
+    with st.form("form_projeto"):
         c1, c2, c3 = st.columns(3)
-        codigo = c1.text_input("Código do Projeto*")
-        nome = c2.text_input("Nome do Projeto*")
-        departamento = c3.text_input("Departamento")
+        codigo = c1.text_input("Código do Projeto (Gerado Automaticamente)", value=def_codigo, disabled=True)
+        nome = c2.text_input("Nome do Projeto*", value=def_nome)
+        departamento = c3.text_input("Departamento", value=def_departamento)
 
         c4, c5, c6 = st.columns(3)
-        setor = c4.text_input("Setor")
-        responsavel = c5.text_input("Responsável")
-        doc_demanda = c6.text_input("Doc. Demanda")
+        setor = c4.text_input("Setor", value=def_setor)
+        responsavel = c5.text_input("Responsável", value=def_responsavel)
+        doc_demanda = c6.text_input("Doc. Demanda", value=def_doc)
 
         c7, c8, c9 = st.columns(3)
-        data_receb_demanda = c7.date_input("Data Rec. Demanda")
-        data_inicio = c8.date_input("Data Início")
-        data_fim_prevista = c9.date_input("Data Fim Prevista")
+        data_receb_demanda = c7.date_input("Data Rec. Demanda", value=def_dt_rec)
+        data_inicio = c8.date_input("Data Início", value=def_dt_ini)
+        data_fim_prevista = c9.date_input("Data Fim Prevista", value=def_dt_fim)
 
-        status_projeto = st.selectbox("Status do Projeto", ["Em Andamento", "Pendente", "Concluído", "Cancelado"])
-        justificativa = st.text_area("Justificativa")
-        obs = st.text_area("Observações")
+        status_projeto = st.selectbox("Status do Projeto", ["Em Andamento", "Pendente", "Concluído", "Cancelado"], index=def_status_idx)
+        justificativa = st.text_area("Justificativa", value=def_justificativa)
+        obs = st.text_area("Observações", value=def_obs)
 
-        salvar = st.form_submit_button("💾 Salvar Projeto")
+        texto_botao = "💾 Atualizar Projeto" if modo_edicao else "💾 Salvar Novo Projeto"
+        salvar = st.form_submit_button(texto_botao)
 
         if salvar:
-            if not codigo or not nome:
-                st.error("Os campos Código e Nome do Projeto são obrigatórios!")
+            if not nome:
+                st.error("O campo Nome do Projeto é obrigatório!")
             else:
                 try:
                     payload = {
-                        "codigo": codigo,
+                        "codigo": def_codigo,
                         "nome": nome,
                         "departamento": departamento,
                         "setor": setor,
@@ -231,54 +313,117 @@ elif menu == "Cadastro de Projetos":
                         "justificativa": justificativa,
                         "obs": obs
                     }
-                    supabase.table("projetos").insert(payload).execute()
-                    st.success("Projeto cadastrado com sucesso!")
+                    if modo_edicao:
+                        supabase.table("projetos").update(payload).eq("codigo", def_codigo).execute()
+                        st.success("Projeto atualizado com sucesso!")
+                    else:
+                        supabase.table("projetos").insert(payload).execute()
+                        st.success("Projeto cadastrado com sucesso!")
                     st.rerun()
                 except Exception as e:
                     st.error(f"Erro ao salvar projeto: {e}")
 
     st.markdown("---")
     st.subheader("📋 Projetos Cadastrados")
-    df_p = get_projetos()
-    if not df_p.empty:
-        st.dataframe(df_p, use_container_width=True)
+    df_p_atualizado = get_projetos()
+    if not df_p_atualizado.empty:
+        st.dataframe(df_p_atualizado, use_container_width=True)
 
 # -----------------------------------------------------------------------------
-# 3. CADASTRO DE PROCESSOS
+# 3. CADASTRO DE PROCESSOS / METAS
 # -----------------------------------------------------------------------------
-elif menu == "Cadastro de Processos":
-    st.title("⚙️ Cadastro de Processos/Etapas")
+elif menu == "Cadastro de Processos / Metas":
+    st.title("⚙️ Cadastro e Edição de Processos e Metas")
 
     df_proj = get_projetos()
+    df_proc_all = get_processos()
+
     if df_proj.empty or 'codigo' not in df_proj.columns:
-        st.warning("Cadastre pelo menos um projeto antes de adicionar processos.")
+        st.warning("Cadastre pelo menos um projeto antes de adicionar processos/metas.")
     else:
-        with st.form("form_processo", clear_on_submit=True):
+        # Seção de seleção para edição ou novo cadastro
+        modo_edicao_proc = False
+        processo_selecionado = None
+
+        if not df_proc_all.empty:
+            st.markdown("💡 *Selecione um processo existente para editá-lo ou escolha cadastrar um novo.*")
+            lista_opcoes_proc = ["-- Cadastrar Novo Processo/Meta --"] + [f"{r['codigo']} - {r['nome_processo']}" for _, r in
+                                                                          df_proc_all.iterrows()]
+            escolha_proc = st.selectbox("Ação / Selecionar Processo ou Meta", lista_opcoes_proc)
+
+            if escolha_proc != "-- Cadastrar Novo Processo/Meta --":
+                cod_proc_escolhido = escolha_proc.split(" - ")[0]
+                processo_selecionado = df_proc_all[df_proc_all['codigo'] == cod_proc_escolhido].iloc[0]
+                modo_edicao_proc = True
+
+        # Atribuição de valores iniciais (Edição vs Novo)
+        if modo_edicao_proc and processo_selecionado is not None:
+            st.info(f"✏️ Editando o processo: **{processo_selecionado['codigo']}**")
+            def_cod_proc = processo_selecionado['codigo']
+
+            # Index do projeto vinculado
+            proj_list = df_proj["codigo"].tolist()
+            atual_proj = processo_selecionado.get('codigo_projeto')
+            def_proj_idx = proj_list.index(atual_proj) if atual_proj in proj_list else 0
+
+            def_nome_proc = processo_selecionado.get('nome_processo', '')
+            def_ordem = int(processo_selecionado.get('ordem', 1))
+
+            try:
+                def_dt_ini_proc = pd.to_datetime(processo_selecionado.get('data_inicial', date.today())).date()
+            except:
+                def_dt_ini_proc = date.today()
+            try:
+                def_dt_fim_proc = pd.to_datetime(processo_selecionado.get('data_final', date.today())).date()
+            except:
+                def_dt_fim_proc = date.today()
+
+            status_meta_list = ["Pendente", "Cumprida", "Cumprida em Atraso", "Não Cumprida", "Atrasado"]
+            cur_status_meta = processo_selecionado.get('status', 'Pendente')
+            def_status_meta_idx = status_meta_list.index(cur_status_meta) if cur_status_meta in status_meta_list else 0
+
+            def_just_proc = processo_selecionado.get('justificativa', '')
+            def_obs_proc = processo_selecionado.get('obs', '')
+        else:
+            def_cod_proc = gerar_codigo_processo()
+            def_proj_idx = 0
+            def_nome_proc = ""
+            def_ordem = 1
+            def_dt_ini_proc = date.today()
+            def_dt_fim_proc = date.today()
+            def_status_meta_idx = 0
+            def_just_proc = ""
+            def_obs_proc = ""
+
+        with st.form("form_processo"):
             c1, c2 = st.columns(2)
-            codigo_proj = c1.selectbox("Selecione o Projeto Vinculado*", df_proj["codigo"].tolist())
-            codigo_proc = c2.text_input("Código do Processo*")
+            codigo_proj = c1.selectbox("Selecione o Projeto Vinculado*", df_proj["codigo"].tolist(), index=def_proj_idx)
+            # Campo de código automático e desativado para garantir que não seja acessado/modificado manualmente
+            codigo_proc = c2.text_input("Código do Processo/Meta (Automático)*", value=def_cod_proc, disabled=True)
 
             c3, c4 = st.columns(2)
-            nome_proc = c3.text_input("Nome do Processo / Meta*")
-            ordem = c4.number_input("Ordem de Execução (Sequência)", min_value=1, value=1)
+            nome_proc = c3.text_input("Nome do Processo / Meta*", value=def_nome_proc)
+            ordem = c4.number_input("Ordem de Execução (Sequência)", min_value=1, value=def_ordem)
 
             c5, c6, c7 = st.columns(3)
-            data_inicial = c5.date_input("Data Inicial")
-            data_final = c6.date_input("Data Final")
-            status = c7.selectbox("Status da Meta", ["Pendente", "Cumprida", "Cumprida em Atraso", "Não Cumprida"])
+            data_inicial = c5.date_input("Data Inicial", value=def_dt_ini_proc)
+            data_final = c6.date_input("Data Final (Prazo da Meta)", value=def_dt_fim_proc)
+            status = c7.selectbox("Status da Meta", ["Pendente", "Cumprida", "Cumprida em Atraso", "Não Cumprida"],
+                                  index=def_status_meta_idx if def_status_meta_idx < 4 else 0)
 
-            justificativa = st.text_area("Justificativa (Se houver alteração/atraso)")
-            obs = st.text_area("Observações")
+            justificativa = st.text_area("Justificativa (Se houver alteração/atraso)", value=def_just_proc)
+            obs = st.text_area("Observações", value=def_obs_proc)
 
-            salvar_proc = st.form_submit_button("💾 Salvar Processo")
+            texto_botao_proc = "💾 Atualizar Processo/Meta" if modo_edicao_proc else "💾 Salvar Novo Processo/Meta"
+            salvar_proc = st.form_submit_button(texto_botao_proc)
 
             if salvar_proc:
-                if not codigo_proc or not nome_proc:
-                    st.error("Código e Nome do Processo são obrigatórios!")
+                if not nome_proc:
+                    st.error("O Nome do Processo é obrigatório!")
                 else:
                     try:
                         payload = {
-                            "codigo": codigo_proc,
+                            "codigo": def_cod_proc,
                             "codigo_projeto": codigo_proj,
                             "nome_processo": nome_proc,
                             "ordem": int(ordem),
@@ -288,22 +433,25 @@ elif menu == "Cadastro de Processos":
                             "justificativa": justificativa,
                             "obs": obs
                         }
-                        supabase.table("processos").insert(payload).execute()
-                        st.success("Processo cadastrado com sucesso!")
+                        if modo_edicao_proc:
+                            supabase.table("processos").update(payload).eq("codigo", def_cod_proc).execute()
+                            st.success("Processo/Meta atualizado com sucesso!")
+                        else:
+                            supabase.table("processos").insert(payload).execute()
+                            st.success("Processo/Meta cadastrado com sucesso!")
                         st.rerun()
                     except Exception as e:
                         st.error(f"Erro ao salvar processo: {e}")
 
         st.markdown("---")
-        st.subheader("📋 Lista de Processos")
+        st.subheader("📋 Lista Geral de Processos e Metas")
         st.dataframe(get_processos(), use_container_width=True)
 
 # -----------------------------------------------------------------------------
-# 4. GANTT & REAGENDAMENTO EM CASCATA
+# 4. GANTT & REAGENDAMENTO CASCATA
 # -----------------------------------------------------------------------------
 elif menu == "Gantt & Reagendamento Cascata":
-    st.title("📅 Cronograma de Processos (Gantt) & Prorrogação em Cascata")
-    st.markdown("Altere a data final de um processo para **empurrar automaticamente** os processos seguintes na sequência de datas.")
+    st.title("📅 Cronograma (Gantt) & Prorrogação Cascata")
 
     df_proj = get_projetos()
     if not df_proj.empty and 'codigo' in df_proj.columns:
@@ -315,20 +463,20 @@ elif menu == "Gantt & Reagendamento Cascata":
             df_proc['data_final'] = pd.to_datetime(df_proc['data_final'])
             df_proc = df_proc.sort_values("ordem")
 
-            # Visualização do Cronograma Gantt
             fig_gantt = px.timeline(
                 df_proc,
                 x_start="data_inicial",
                 x_end="data_final",
                 y="nome_processo",
                 color="status",
-                title=f"Linha do Tempo de Execução - Projeto {proj_sel}",
-                labels={"nome_processo": "Processo / Etapa"},
+                title=f"Linha do Tempo - Projeto {proj_sel}",
+                labels={"nome_processo": "Processo / Meta"},
                 color_discrete_map={
                     'Cumprida': '#22c55e',
                     'Cumprida em Atraso': '#eab308',
                     'Pendente': '#3b82f6',
-                    'Não Cumprida': '#ef4444'
+                    'Atrasado': '#ef4444',
+                    'Não Cumprida': '#991b1b'
                 }
             )
             fig_gantt.update_yaxes(autorange="reversed")
@@ -336,18 +484,18 @@ elif menu == "Gantt & Reagendamento Cascata":
             st.plotly_chart(fig_gantt, use_container_width=True)
 
             st.markdown("---")
-            st.subheader("⏩ Prorrogar Processo e Ajustar Datas Sequenciais")
+            st.subheader("⏩ Prorrogagão em Cascata")
 
             with st.form("form_prorrogacao"):
                 proc_sel = st.selectbox("Selecione o Processo para Prorrogar", df_proc["codigo"].tolist())
-                dias_adiar = st.number_input("Adicionar Quantos Dias de Prorrogação?", min_value=1, value=1)
-                justificativa = st.text_area("Justificativa para Prorrogação*")
+                dias_adiar = st.number_input("Adicionar Quantos Dias?", min_value=1, value=1)
+                justificativa = st.text_area("Justificativa da Prorrogação*")
 
-                btn_prorrogar = st.form_submit_button("⚡ Aplicar Prorrogação em Cascata")
+                btn_prorrogar = st.form_submit_button("⚡ Aplicar em Cascata")
 
                 if btn_prorrogar:
                     if not justificativa:
-                        st.error("Informe obrigatoriamente a justificativa para a prorrogação.")
+                        st.error("Informe a justificativa!")
                     else:
                         try:
                             row_proc = df_proc[df_proc['codigo'] == proc_sel].iloc[0]
@@ -369,17 +517,55 @@ elif menu == "Gantt & Reagendamento Cascata":
 
                                     supabase.table("processos").update(payload).eq("codigo", r['codigo']).execute()
 
-                            st.success("Cronograma recalculado e datas atualizadas em cascata!")
+                            st.success("Reagendamento executado com sucesso!")
                             st.rerun()
                         except Exception as e:
-                            st.error(f"Erro ao processar reagendamento: {e}")
+                            st.error(f"Erro ao prorrogar: {e}")
         else:
             st.info("Nenhum processo vinculado a este projeto.")
-    else:
-        st.info("Nenhum projeto cadastrado.")
 
 # -----------------------------------------------------------------------------
-# 5. RELATÓRIO POR DEPARTAMENTO
+# 5. GESTÃO E ATUALIZAÇÃO DE METAS
+# -----------------------------------------------------------------------------
+elif menu == "Gestão e Atualização de Metas":
+    st.title("🎯 Gestão Direta de Metas e Entregas")
+    st.markdown("Atualize o status da meta de cada processo conforme as entregas forem realizadas.")
+
+    df_proj = get_projetos()
+    if not df_proj.empty:
+        proj_sel = st.selectbox("Selecione o Projeto para Gerenciar Metas", df_proj["codigo"].tolist())
+        df_proc = get_processos(proj_sel)
+
+        if not df_proc.empty:
+            for idx, row in df_proc.iterrows():
+                with st.expander(f"Meta: {row['nome_processo']} | Status Atual: {row['status']}"):
+                    with st.form(f"form_update_{row['codigo']}"):
+                        novo_status = st.selectbox(
+                            "Novo Status da Meta",
+                            ["Pendente", "Cumprida", "Cumprida em Atraso", "Não Cumprida"],
+                            index=["Pendente", "Cumprida", "Cumprida em Atraso", "Não Cumprida"].index(
+                                row['status'] if row['status'] in ["Pendente", "Cumprida", "Cumprida em Atraso",
+                                                                   "Não Cumprida"] else "Pendente"
+                            )
+                        )
+                        nova_just = st.text_area("Justificativa / Observações da Entrega", value=row.get('justificativa', ''))
+
+                        b_salvar = st.form_submit_button("Atualizar Meta")
+                        if b_salvar:
+                            try:
+                                supabase.table("processos").update({
+                                    "status": novo_status,
+                                    "justificativa": nova_just
+                                }).eq("codigo", row['codigo']).execute()
+                                st.success("Meta atualizada!")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Erro ao atualizar: {e}")
+        else:
+            st.info("Nenhum processo cadastrado para este projeto.")
+
+# -----------------------------------------------------------------------------
+# 6. RELATÓRIO POR DEPARTAMENTO
 # -----------------------------------------------------------------------------
 elif menu == "Relatório por Departamento":
     st.title("📄 Relatórios por Departamento")
@@ -395,7 +581,15 @@ elif menu == "Relatório por Departamento":
             df_proj = df_proj[df_proj['departamento'] == dep_filtro]
 
         for _, proj in df_proj.iterrows():
-            with st.expander(f"📁 Projeto: {proj['nome']} | Código: {proj['codigo']} | Status: {proj.get('status_projeto', 'N/A')}"):
+            procs_p = df_proc[df_proc['codigo_projeto'] == proj['codigo']] if not df_proc.empty else pd.DataFrame()
+            pct_concluido = 0
+            if not procs_p.empty:
+                cumpridas = procs_p[procs_p['status'].isin(['Cumprida', 'Cumprida em Atraso'])].shape[0]
+                pct_concluido = int((cumpridas / procs_p.shape[0]) * 100)
+
+            with st.expander(
+                    f"📁 {proj['nome']} ({proj['codigo']}) — Progresso: {pct_concluido}% | Status: {proj.get('status_projeto', 'N/A')}"):
+                st.progress(pct_concluido / 100)
                 col1, col2, col3 = st.columns(3)
                 col1.write(f"**Departamento:** {proj.get('departamento', 'N/A')}")
                 col1.write(f"**Setor:** {proj.get('setor', 'N/A')}")
@@ -404,13 +598,12 @@ elif menu == "Relatório por Departamento":
                 col3.write(f"**Fim Previsto:** {proj.get('data_fim_prevista', 'N/A')}")
                 col3.write(f"**Doc. Demanda:** {proj.get('doc_demanda', 'N/A')}")
 
-                if not df_proc.empty and 'codigo_projeto' in df_proc.columns:
-                    procs_p = df_proc[df_proc['codigo_projeto'] == proj['codigo']]
-                    st.markdown("#### ⚙️ Processos / Metas Associadas:")
-                    if not procs_p.empty:
-                        cols_exibir = [c for c in
-                                       ['ordem', 'codigo', 'nome_processo', 'data_inicial', 'data_final', 'data_prorrogacao', 'status',
-                                        'justificativa'] if c in procs_p.columns]
-                        st.dataframe(procs_p[cols_exibir], use_container_width=True)
-                    else:
-                        st.info("Nenhum processo associado a este projeto.")
+                st.markdown("#### ⚙️ Processos e Metas Associadas:")
+                if not procs_p.empty:
+                    cols_exibir = [c for c in
+                                   ['ordem', 'codigo', 'nome_processo', 'data_inicial', 'data_final', 'data_prorrogacao', 'status',
+                                    'justificativa']
+                                   if c in procs_p.columns]
+                    st.dataframe(procs_p[cols_exibir], use_container_width=True)
+                else:
+                    st.info("Nenhum processo associado a este projeto.")
