@@ -84,7 +84,13 @@ def get_processos(codigo_projeto=None) -> pd.DataFrame:
         query = supabase.table("processos").select("*")
         if codigo_projeto:
             query = query.eq("codigo_projeto", codigo_projeto)
-        res = query.order("ordem").execute()
+        # Mantendo ordenação por data inicial ou ordem caso exista na tabela
+        if 'ordem' in supabase.table("processos").select("ordem").limit(1).execute().data[0] if supabase.table("processos").select(
+                "ordem").limit(1).execute().data else False:
+            res = query.order("ordem").execute()
+        else:
+            res = query.execute()
+
         if res.data:
             df = pd.DataFrame(res.data)
             hoje = date.today()
@@ -97,6 +103,16 @@ def get_processos(codigo_projeto=None) -> pd.DataFrame:
             return df
         return pd.DataFrame()
     except Exception:
+        # Fallback se a coluna ordem não existir mais na query
+        try:
+            query = supabase.table("processos").select("*")
+            if codigo_projeto:
+                query = query.eq("codigo_projeto", codigo_projeto)
+            res = query.execute()
+            if res.data:
+                return pd.DataFrame(res.data)
+        except:
+            pass
         return pd.DataFrame()
 
 
@@ -357,17 +373,27 @@ elif menu == "Cadastro de Processos / Metas":
                 modo_edicao_proc = True
 
         # Atribuição de valores iniciais (Edição vs Novo)
+        # Mapeando lista de projetos formatada para exibir Código + Nome na pesquisa
+        mapa_projetos = {}
+        for _, row_p in df_proj.iterrows():
+            rotulo_proj = f"{row_p['codigo']} - {row_p['nome']}"
+            mapa_projetos[rotulo_proj] = row_p['codigo']
+
+        lista_opcoes_projetos_formatada = list(mapa_projetos.keys())
+
         if modo_edicao_proc and processo_selecionado is not None:
             st.info(f"✏️ Editando o processo: **{processo_selecionado['codigo']}**")
             def_cod_proc = processo_selecionado['codigo']
 
-            # Index do projeto vinculado
-            proj_list = df_proj["codigo"].tolist()
-            atual_proj = processo_selecionado.get('codigo_projeto')
-            def_proj_idx = proj_list.index(atual_proj) if atual_proj in proj_list else 0
+            # Index do projeto vinculado formatado
+            atual_proj_codigo = processo_selecionado.get('codigo_projeto')
+            def_proj_idx = 0
+            for idx_p, (rot, cod_p) in enumerate(mapa_projetos.items()):
+                if cod_p == atual_proj_codigo:
+                    def_proj_idx = idx_p
+                    break
 
             def_nome_proc = processo_selecionado.get('nome_processo', '')
-            def_ordem = int(processo_selecionado.get('ordem', 1))
 
             try:
                 def_dt_ini_proc = pd.to_datetime(processo_selecionado.get('data_inicial', date.today())).date()
@@ -388,7 +414,6 @@ elif menu == "Cadastro de Processos / Metas":
             def_cod_proc = gerar_codigo_processo()
             def_proj_idx = 0
             def_nome_proc = ""
-            def_ordem = 1
             def_dt_ini_proc = date.today()
             def_dt_fim_proc = date.today()
             def_status_meta_idx = 0
@@ -397,13 +422,13 @@ elif menu == "Cadastro de Processos / Metas":
 
         with st.form("form_processo"):
             c1, c2 = st.columns(2)
-            codigo_proj = c1.selectbox("Selecione o Projeto Vinculado*", df_proj["codigo"].tolist(), index=def_proj_idx)
+            projeto_selecionado_rotulo = c1.selectbox("Selecione o Projeto Vinculado*", lista_opcoes_projetos_formatada, index=def_proj_idx)
+            codigo_proj = mapa_projetos[projeto_selecionado_rotulo]
+
             # Campo de código automático e desativado para garantir que não seja acessado/modificado manualmente
             codigo_proc = c2.text_input("Código do Processo/Meta (Automático)*", value=def_cod_proc, disabled=True)
 
-            c3, c4 = st.columns(2)
-            nome_proc = c3.text_input("Nome do Processo / Meta*", value=def_nome_proc)
-            ordem = c4.number_input("Ordem de Execução (Sequência)", min_value=1, value=def_ordem)
+            nome_proc = st.text_input("Nome do Processo / Meta*", value=def_nome_proc)
 
             c5, c6, c7 = st.columns(3)
             data_inicial = c5.date_input("Data Inicial", value=def_dt_ini_proc)
@@ -426,7 +451,6 @@ elif menu == "Cadastro de Processos / Metas":
                             "codigo": def_cod_proc,
                             "codigo_projeto": codigo_proj,
                             "nome_processo": nome_proc,
-                            "ordem": int(ordem),
                             "data_inicial": str(data_inicial),
                             "data_final": str(data_final),
                             "status": status,
@@ -455,13 +479,25 @@ elif menu == "Gantt & Reagendamento Cascata":
 
     df_proj = get_projetos()
     if not df_proj.empty and 'codigo' in df_proj.columns:
-        proj_sel = st.selectbox("Selecione um Projeto", df_proj["codigo"].tolist())
+        # Criando dicionário para exibir Nome do Projeto na seleção do Gantt também
+        mapa_proj_gantt = {}
+        for _, row_p in df_proj.iterrows():
+            mapa_proj_gantt[f"{row_p['codigo']} - {row_p['nome']}"] = row_p['codigo']
+
+        proj_sel_rotulo = st.selectbox("Selecione um Projeto", list(mapa_proj_gantt.keys()))
+        proj_sel = mapa_proj_gantt[proj_sel_rotulo]
+
         df_proc = get_processos(proj_sel)
 
-        if not df_proc.empty and 'ordem' in df_proc.columns:
+        if not df_proc.empty:
             df_proc['data_inicial'] = pd.to_datetime(df_proc['data_inicial'])
             df_proc['data_final'] = pd.to_datetime(df_proc['data_final'])
-            df_proc = df_proc.sort_values("ordem")
+
+            # Ordenação por data inicial caso a coluna ordem tenha sido removida do banco
+            if 'ordem' in df_proc.columns:
+                df_proc = df_proc.sort_values("ordem")
+            else:
+                df_proc = df_proc.sort_values("data_inicial")
 
             fig_gantt = px.timeline(
                 df_proc,
@@ -499,23 +535,41 @@ elif menu == "Gantt & Reagendamento Cascata":
                     else:
                         try:
                             row_proc = df_proc[df_proc['codigo'] == proc_sel].iloc[0]
-                            ordem_alvo = row_proc['ordem']
 
-                            for _, r in df_proc.iterrows():
-                                if r['ordem'] >= ordem_alvo:
-                                    n_ini = r['data_inicial'] + timedelta(days=int(dias_adiar))
-                                    n_fim = r['data_final'] + timedelta(days=int(dias_adiar))
+                            # Baseando a cascata na data inicial ou ordem se existir
+                            if 'ordem' in df_proc.columns and pd.notnull(row_proc.get('ordem')):
+                                ordem_alvo = row_proc['ordem']
+                                for _, r in df_proc.iterrows():
+                                    if r.get('ordem', 0) >= ordem_alvo:
+                                        n_ini = r['data_inicial'] + timedelta(days=int(dias_adiar))
+                                        n_fim = r['data_final'] + timedelta(days=int(dias_adiar))
 
-                                    payload = {
-                                        "data_inicial": n_ini.strftime('%Y-%m-%d'),
-                                        "data_final": n_fim.strftime('%Y-%m-%d')
-                                    }
+                                        payload = {
+                                            "data_inicial": n_ini.strftime('%Y-%m-%d'),
+                                            "data_final": n_fim.strftime('%Y-%m-%d')
+                                        }
 
-                                    if r['codigo'] == proc_sel:
-                                        payload["data_prorrogacao"] = n_fim.strftime('%Y-%m-%d')
-                                        payload["justificativa"] = justificativa
+                                        if r['codigo'] == proc_sel:
+                                            payload["justificativa"] = justificativa
 
-                                    supabase.table("processos").update(payload).eq("codigo", r['codigo']).execute()
+                                        supabase.table("processos").update(payload).eq("codigo", r['codigo']).execute()
+                            else:
+                                # Caso não use ordem numérica, prorroga apenas o selecionado e posteriores por data
+                                dt_alvo_ini = row_proc['data_inicial']
+                                for _, r in df_proc.iterrows():
+                                    if r['data_inicial'] >= dt_alvo_ini:
+                                        n_ini = r['data_inicial'] + timedelta(days=int(dias_adiar))
+                                        n_fim = r['data_final'] + timedelta(days=int(dias_adiar))
+
+                                        payload = {
+                                            "data_inicial": n_ini.strftime('%Y-%m-%d'),
+                                            "data_final": n_fim.strftime('%Y-%m-%d')
+                                        }
+
+                                        if r['codigo'] == proc_sel:
+                                            payload["justificativa"] = justificativa
+
+                                        supabase.table("processos").update(payload).eq("codigo", r['codigo']).execute()
 
                             st.success("Reagendamento executado com sucesso!")
                             st.rerun()
@@ -533,7 +587,15 @@ elif menu == "Gestão e Atualização de Metas":
 
     df_proj = get_projetos()
     if not df_proj.empty:
-        proj_sel = st.selectbox("Selecione o Projeto para Gerenciar Metas", df_proj["codigo"].tolist())
+        # Mapeando projetos para mostrar o nome do projeto na pesquisa
+        mapa_proj_gestao = {}
+        for _, row_p in df_proj.iterrows():
+            rotulo = f"{row_p['codigo']} - {row_p['nome']}"
+            mapa_proj_gestao[rotulo] = row_p['codigo']
+
+        proj_sel_rotulo = st.selectbox("Selecione o Projeto para Gerenciar Metas", list(mapa_proj_gestao.keys()))
+        proj_sel = mapa_proj_gestao[proj_sel_rotulo]
+
         df_proc = get_processos(proj_sel)
 
         if not df_proc.empty:
@@ -600,9 +662,9 @@ elif menu == "Relatório por Departamento":
 
                 st.markdown("#### ⚙️ Processos e Metas Associadas:")
                 if not procs_p.empty:
+                    # Removida a coluna 'ordem' da exibição se não existir ou se preferir omitir
                     cols_exibir = [c for c in
-                                   ['ordem', 'codigo', 'nome_processo', 'data_inicial', 'data_final', 'data_prorrogacao', 'status',
-                                    'justificativa']
+                                   ['codigo', 'nome_processo', 'data_inicial', 'data_final', 'status', 'justificativa']
                                    if c in procs_p.columns]
                     st.dataframe(procs_p[cols_exibir], use_container_width=True)
                 else:
