@@ -13,7 +13,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# CSS Customizado para Zerar Totalmente o Espaço do Topo
+# CSS Customizado para Zerar Totalmente o Espaço do Topo e Centralizar Modal/Dialogs
 st.markdown("""
 <style>
 /* Oculta o menu nativo, barra superior, rodapé e o header fixo do Streamlit */
@@ -77,6 +77,51 @@ div[data-testid="stMainBlockContainer"] {
     border-radius: 8px;
     margin-bottom: 10px;
     box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+/* Modal / Modal Dialog centralizado na tela */
+.center-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background-color: rgba(0, 0, 0, 0.5);
+    z-index: 999999;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.center-modal-box {
+    background-color: #ffffff;
+    padding: 30px;
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.25);
+    max-width: 550px;
+    width: 90%;
+    text-align: center;
+    border-top: 6px solid #f39c12;
+}
+
+.center-modal-box h3 {
+    color: #d35400;
+    margin-top: 0;
+}
+
+.center-modal-box p {
+    color: #333333;
+    font-size: 1rem;
+    line-height: 1.5;
+}
+
+.center-modal-box ul {
+    text-align: left;
+    background: #fdf2e9;
+    padding: 10px 20px;
+    border-radius: 8px;
+    list-style-type: square;
+    margin: 15px 0;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -456,6 +501,44 @@ elif menu == "📝 Gestão de Eventos":
     events_resp = supabase.table("eventos").select("*").execute()
     events_df = pd.DataFrame(events_resp.data) if events_resp.data else pd.DataFrame()
 
+
+    # Função auxiliar para checar se a data informada possui conflitos de eventos
+    def verificar_conflito_data(data_alvo, codigo_atual=None):
+        query_exist = supabase.table("eventos").select("codigo, evento").eq("dataevento", str(data_alvo))
+        if codigo_atual:
+            query_exist = query_exist.neq("codigo", codigo_atual)
+        exist_resp = query_exist.execute()
+        return exist_resp.data if exist_resp.data else []
+
+
+    # Suporte nativo ao st.dialog (disponível em versões recentes do Streamlit)
+    has_dialog_support = hasattr(st, "dialog")
+
+    if has_dialog_support:
+        @st.dialog("⚠️ Conflito de Agenda Detectado", width="medium")
+        def modal_alerta_data_dialog():
+            conflitos = st.session_state.get("date_conflict_list", [])
+            data_fmt = st.session_state.get("date_conflict_fmt", "")
+
+            st.warning(f"Já existe(m) evento(s) cadastrado(s) para a data **{data_fmt}**:")
+            for nome_e in conflitos:
+                st.markdown(f"- 📌 **{nome_e}**")
+
+            st.write("Deseja continuar com essa data ou escolher outra?")
+
+            col_d1, col_d2 = st.columns(2)
+            if col_d1.button("⚠️ Sim, continuar", use_container_width=True):
+                st.session_state["ignore_date_conflict"] = True
+                if "show_date_conflict_modal" in st.session_state:
+                    st.session_state["show_date_conflict_modal"] = False
+                st.rerun()
+
+            if col_d2.button("❌ Alterar Data", use_container_width=True):
+                st.session_state["ignore_date_conflict"] = False
+                if "show_date_conflict_modal" in st.session_state:
+                    st.session_state["show_date_conflict_modal"] = False
+                st.rerun()
+
     with tab1:
         col1, col2 = st.columns([1.2, 1.8], gap="large")
 
@@ -517,6 +600,72 @@ elif menu == "📝 Gestão de Eventos":
             if codigo_edit and ev_escoladpto_val in opcoes_escoladpto:
                 idx_escoladpto = opcoes_escoladpto.index(ev_escoladpto_val)
 
+
+            # Callback executado no momento imediato em que a data do evento é alterada
+            def on_change_data_evento():
+                data_selecionada = st.session_state.get("dt_input_key")
+                if data_selecionada:
+                    if st.session_state.get("last_checked_date") != str(data_selecionada):
+                        conflitos = verificar_conflito_data(data_selecionada, codigo_edit)
+                        if conflitos:
+                            st.session_state["show_date_conflict_modal"] = True
+                            st.session_state["date_conflict_list"] = [c["evento"] for c in conflitos]
+                            st.session_state["date_conflict_fmt"] = data_selecionada.strftime('%d/%m/%Y')
+                            st.session_state["ignore_date_conflict"] = False
+                        else:
+                            st.session_state["show_date_conflict_modal"] = False
+                            st.session_state["ignore_date_conflict"] = True
+                        st.session_state["last_checked_date"] = str(data_selecionada)
+
+
+            # Seletor de Data com evento de alteração imediato
+            dataevento = st.date_input(
+                "Data do Evento",
+                value=ev_data if codigo_edit else date.today(),
+                format="DD/MM/YYYY",
+                key="dt_input_key",
+                on_change=on_change_data_evento
+            )
+
+            # Dispara a verificação se a data inicial ainda não foi checada
+            if "last_checked_date" not in st.session_state or st.session_state.get("last_checked_date") != str(dataevento):
+                conflitos_init = verificar_conflito_data(dataevento, codigo_edit)
+                if conflitos_init and not st.session_state.get("ignore_date_conflict", False):
+                    st.session_state["show_date_conflict_modal"] = True
+                    st.session_state["date_conflict_list"] = [c["evento"] for c in conflitos_init]
+                    st.session_state["date_conflict_fmt"] = dataevento.strftime('%d/%m/%Y')
+                st.session_state["last_checked_date"] = str(dataevento)
+
+            # Exibição do Alerta Centralizado na Tela
+            if st.session_state.get("show_date_conflict_modal", False):
+                if has_dialog_support:
+                    modal_alerta_data_dialog()
+                else:
+                    conflitos_txt = "".join([f"<li><b>{e}</b></li>" for e in st.session_state.get("date_conflict_list", [])])
+                    data_fmt = st.session_state.get("date_conflict_fmt", "")
+
+                    st.markdown(f"""
+                    <div class="center-modal-overlay">
+                        <div class="center-modal-box">
+                            <h3>⚠️ Alerta de Conflito de Data</h3>
+                            <p>Já existe(m) evento(s) cadastrado(s) para a data <b>{data_fmt}</b>:</p>
+                            <ul>{conflitos_txt}</ul>
+                            <p>Deseja continuar com essa data mesmo assim ou escolher outra?</p>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                    c_mod1, c_mod2 = st.columns(2)
+                    if c_mod1.button("⚠️ Sim, continuar com essa data", key="btn_sim_center"):
+                        st.session_state["show_date_conflict_modal"] = False
+                        st.session_state["ignore_date_conflict"] = True
+                        st.rerun()
+
+                    if c_mod2.button("❌ Escolher Outra Data", key="btn_nao_center"):
+                        st.session_state["show_date_conflict_modal"] = False
+                        st.session_state["ignore_date_conflict"] = False
+                        st.rerun()
+
             with st.form("form_evento", clear_on_submit=True):
                 evento = st.text_input("Nome do Evento", value=ev_nome if codigo_edit else "")
                 status = st.selectbox("Status", ["aberto", "confirmado", "cancelado", "finalizado"],
@@ -526,8 +675,6 @@ elif menu == "📝 Gestão de Eventos":
                                           index=idx_escoladpto if (
                                                   codigo_edit and opcoes_escoladpto) else 0) if opcoes_escoladpto else st.text_input(
                     "Local/Origem", value=ev_escoladpto_val if codigo_edit else "")
-
-                dataevento = st.date_input("Data do Evento", value=ev_data if codigo_edit else date.today(), format="DD/MM/YYYY")
 
                 c1, c2 = st.columns(2)
                 horaeventoini = c1.time_input("Hora de Início", value=ev_horaini if codigo_edit else time(9, 0))
@@ -542,6 +689,13 @@ elif menu == "📝 Gestão de Eventos":
 
                 if btn_salvar_ev:
                     if evento.strip() and local.strip():
+                        conflitos = verificar_conflito_data(dataevento, codigo_edit)
+                        if conflitos and not st.session_state.get("ignore_date_conflict", False):
+                            st.session_state["show_date_conflict_modal"] = True
+                            st.session_state["date_conflict_list"] = [c["evento"] for c in conflitos]
+                            st.session_state["date_conflict_fmt"] = dataevento.strftime('%d/%m/%Y')
+                            st.rerun()
+
                         payload = {
                             "evento": evento,
                             "status": status,
@@ -555,6 +709,7 @@ elif menu == "📝 Gestão de Eventos":
                             "responsavel": responsavel,
                             "obs": obs
                         }
+
                         if codigo_edit:
                             supabase.table("eventos").update(payload).eq("codigo", codigo_edit).execute()
                             st.success("Evento atualizado!")
@@ -563,6 +718,9 @@ elif menu == "📝 Gestão de Eventos":
                             st.success("Evento criado com sucesso!")
 
                         st.session_state["sel_ev_action"] = "Novo Evento"
+                        st.session_state["ignore_date_conflict"] = False
+                        if "last_checked_date" in st.session_state:
+                            del st.session_state["last_checked_date"]
                         st.rerun()
                     else:
                         st.warning("Preencha os campos obrigatórios (Evento, Local).")
@@ -582,7 +740,7 @@ elif menu == "📝 Gestão de Eventos":
                     display_df["dataevento"] = pd.to_datetime(display_df["dataevento"]).dt.strftime("%d/%m/%Y")
                 st.dataframe(display_df, use_container_width=True)
             else:
-                st.info("Nenum evento registrado no sistema.")
+                st.info("Nenhum evento registrado no sistema.")
 
     with tab2:
         st.subheader("Vincular Departamentos Envolvidos e Necessidades")

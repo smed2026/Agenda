@@ -29,8 +29,8 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Inicialização do Supabase
-SUPABASE_URL = st.secrets.get("SUPABASE_URL", "https://seu-projeto.supabase.co")
-SUPABASE_KEY = st.secrets.get("SUPABASE_KEY", "sua-chave-anon-key")
+SUPABASE_URL = "https://sldhiftwxqynjcnpaysl.supabase.co"
+SUPABASE_KEY = "sb_publishable_m9NM4QJ433cSXQLvM-4PRw_NMEKEorT"
 
 
 @st.cache_resource
